@@ -1,0 +1,501 @@
+// SkyUp News — authentication data model
+// All three sign-in methods (password, phone OTP, OAuth) converge on one User row.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  READER
+  EDITOR
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum VerificationPurpose {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
+enum DigestFrequency {
+  DAILY
+  WEEKLY
+  OFF
+}
+
+enum OtpPurpose {
+  PHONE_LOGIN
+  PHONE_VERIFICATION
+}
+
+model User {
+  id String @id @default(cuid())
+
+  // Either identifier may be null: an OAuth-only or phone-only user has no email,
+  // a phone-first user has no password. At least one identifier is enforced in app code.
+  email           String?   @unique
+  emailVerifiedAt DateTime?
+  phone           String?   @unique // E.164, e.g. +919876543210
+  phoneVerifiedAt DateTime?
+  passwordHash    String?
+
+  displayName     String?
+  avatarUrl       String?
+  /// Set when a picture is uploaded; doubles as the cache-busting version in
+  /// the avatar URL. Lets every query expose an avatar without joining the bytes.
+  avatarUpdatedAt DateTime?
+  role            Role       @default(READER)
+  status          UserStatus @default(ACTIVE)
+
+  // ---- Reader profile ----
+  bio         String?
+  dateOfBirth DateTime?
+  locale      String    @default("en-IN")
+  timezone    String?
+
+  /// Free-text location from the reader's profile form. `country` also drives
+  /// localised pricing on the reader app.
+  country String?
+  state   String?
+  city    String?
+  /// Allotted office location (e.g. "Delhi Bureau", "Mumbai Office", "Noida HQ").
+  /// Scopes employee/manager access to manage business and team within their office.
+  officeLocation String?
+
+  /// Contact number the reader typed into their profile. Deliberately separate
+  /// from `phone`: that one is a verified, unique LOGIN identifier set only by
+  /// the OTP flow, and letting a profile edit write to it would both collide on
+  /// the unique index and let anyone claim an unverified number as identity.
+  contactPhone String?
+
+  /// Morning briefing digest cadence.
+  digestFrequency DigestFrequency @default(DAILY)
+  /// Category slugs used to personalise the feed, e.g. ["Tech", "World"].
+  preferredTopics String[]        @default([])
+
+  // ---- Notification preferences ----
+  notifyBreakingNews Boolean @default(true)
+  notifyNewsletter   Boolean @default(true)
+  notifyProductNews  Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessions              Session[]
+  oauthAccounts         OAuthAccount[]
+  verificationTokens    VerificationToken[]
+  subscription          Subscription?
+  avatar                UserAvatar?
+  articleLikes          ArticleLike[]
+  comments              Comment[]
+  commentLikes          CommentLike[]
+  notifications         Notification[]         @relation("NotificationRecipient")
+  notificationsSent     Notification[]         @relation("NotificationActor")
+  accountActions        AccountAction[]        @relation("AccountActionTarget")
+  accountActionsTaken   AccountAction[]        @relation("AccountActionActor")
+  invoices              Invoice[]
+  newsletterSubscribers NewsletterSubscriber[]
+
+  @@index([status])
+  @@map("users")
+}
+
+/// One row per issued refresh token. Rotation creates a new row in the same
+/// `familyId`; presenting an already-rotated token revokes the whole family.
+model Session {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// SHA-256 of the opaque refresh token. The raw token is never stored.
+  refreshTokenHash String  @unique
+  familyId         String
+  replacedById     String? @unique
+
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+  rotatedAt DateTime?
+  revokedAt DateTime?
+
+  userAgent String?
+  ip        String?
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model OAuthAccount {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  provider          String // "google" | "github" | "apple"
+  providerAccountId String
+
+  createdAt DateTime @default(now())
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@map("oauth_accounts")
+}
+
+model VerificationToken {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tokenHash  String              @unique
+  purpose    VerificationPurpose
+  expiresAt  DateTime
+  createdAt  DateTime            @default(now())
+  consumedAt DateTime?
+
+  @@index([userId, purpose])
+  @@index([expiresAt])
+  @@map("verification_tokens")
+}
+
+/// Not tied to a User: an OTP may be requested for a phone number that has not
+/// signed up yet. Verification then creates or links the account.
+model OtpCode {
+  id String @id @default(cuid())
+
+  phone      String
+  codeHash   String
+  purpose    OtpPurpose
+  expiresAt  DateTime
+  attempts   Int        @default(0)
+  createdAt  DateTime   @default(now())
+  consumedAt DateTime?
+
+  @@index([phone, purpose])
+  @@index([expiresAt])
+  @@map("otp_codes")
+}
+
+/// Fixed-window counters for abuse control (login, OTP sends, password resets).
+model RateLimit {
+  key         String   @id
+  count       Int      @default(0)
+  windowStart DateTime @default(now())
+
+  @@index([windowStart])
+  @@map("rate_limits")
+}
+
+// =============================================================================
+// Subscription & billing
+//
+// The plan CATALOG (pricing, features, promo codes) stays in the platform's
+// subscription-service on :8083. This service owns per-user state: who is
+// entitled to Premium right now, until when, and what they were charged.
+// =============================================================================
+
+enum SubscriptionStatus {
+  NONE
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  EXPIRED
+}
+
+enum BillingPeriod {
+  MONTHLY
+  ANNUAL
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+model Subscription {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Matches `planKey` from the catalog service (currently "premium").
+  planKey String             @default("premium")
+  status  SubscriptionStatus @default(NONE)
+  period  BillingPeriod?
+
+  currentPeriodStart DateTime?
+  /// Entitlement is derived from status + this timestamp; never trusted from the client.
+  currentPeriodEnd   DateTime?
+
+  /// Keeps access until the paid period ends instead of cutting it off immediately.
+  cancelAtPeriodEnd Boolean   @default(false)
+  canceledAt        DateTime?
+
+  // ---- Razorpay linkage ----
+  providerCustomerId     String?
+  providerSubscriptionId String? @unique
+
+  /// Set when staff grant a complimentary subscription rather than a payment.
+  grantedByUserId String?
+  grantNote       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([currentPeriodEnd])
+  @@map("subscriptions")
+}
+
+model Invoice {
+  id String @id @default(cuid())
+
+  /// Nullable so a deleted reader's payment record can survive them with the
+  /// identifying link severed. Financial law requires retaining the record;
+  /// data-protection law requires not retaining the person.
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  /// Razorpay order id — the idempotency anchor for a checkout attempt.
+  providerOrderId   String? @unique
+  providerPaymentId String?
+
+  /// Minor units (paise for INR, cents for USD) to avoid float rounding on money.
+  amount          Int
+  currency        String        @default("INR")
+  status          InvoiceStatus @default(PENDING)
+  period          BillingPeriod
+  promoCode       String?
+  discountPercent Int?
+  /// Amount before the promo discount, for showing "was / now" on receipts.
+  originalAmount  Int?
+
+  paymentMethod String?
+  failureReason String?
+
+  issuedAt DateTime  @default(now())
+  paidAt   DateTime?
+
+  @@index([userId, issuedAt])
+  @@index([status])
+  @@map("invoices")
+}
+
+/// Webhook deliveries are retried by the provider, so every event id is recorded
+/// and replayed events are ignored rather than double-applied.
+model WebhookEvent {
+  id          String   @id
+  provider    String   @default("razorpay")
+  eventType   String
+  processedAt DateTime @default(now())
+
+  @@index([provider, eventType])
+  @@map("webhook_events")
+}
+
+/// Uploaded profile picture, kept in its own table so the bytes are never
+/// pulled into an ordinary user query. Served by `GET /api/avatar/{userId}`
+/// so list responses carry a short URL instead of ~20KB of inline data URI.
+model UserAvatar {
+  userId String @id
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  data      Bytes
+  mimeType  String
+  /// Used as the ETag so browsers can revalidate cheaply.
+  updatedAt DateTime @updatedAt
+
+  @@map("user_avatars")
+}
+
+// =============================================================================
+// Engagement
+//
+// Articles live in the platform's feed service, so only their id is stored here
+// plus a title snapshot for display — this service never needs to join to them.
+// =============================================================================
+
+model ArticleLike {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  articleId    String
+  articleTitle String?
+
+  createdAt DateTime @default(now())
+
+  /// One like per reader per article; the unique index is what makes the
+  /// toggle idempotent under double-taps.
+  @@unique([userId, articleId])
+  @@index([articleId])
+  @@index([userId, createdAt])
+  @@map("article_likes")
+}
+
+model Comment {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  articleId       String
+  articleTitle    String?
+  /// The article's dateline, snapshotted at write time like the title.
+  /// Articles live in the feed service, so filtering by where a story is from
+  /// has to be answerable here without a cross-service lookup.
+  articleLocation String?
+
+  /// Null for a top-level comment; set for a reply. One level of nesting is
+  /// what the UI shows, but the shape allows deeper threads.
+  parentId String?
+  /// SetNull, not Cascade: when a reader deletes their account their own
+  /// comments go with them, but replies OTHER people wrote must not. A cascade
+  /// here lets one person's erasure silently destroy someone else's words.
+  /// An orphaned reply simply becomes a top-level comment.
+  parent   Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: SetNull)
+  replies  Comment[] @relation("CommentReplies")
+
+  body String
+
+  createdAt DateTime  @default(now())
+  editedAt  DateTime?
+  /// Soft delete: a removed parent must keep its replies readable, so the row
+  /// stays and the body is hidden instead.
+  deletedAt DateTime?
+
+  likes CommentLike[]
+
+  /// Denormalised counters. Maintained in the same transaction as the like
+  /// or reply that changes them, because COUNT(*) per comment collapses
+  /// once a thread is large — and Prisma cannot even build the query.
+  likeCount  Int @default(0)
+  replyCount Int @default(0)
+
+  @@index([articleId, createdAt])
+  @@index([parentId])
+  @@index([userId, createdAt])
+  @@map("comments")
+}
+
+model CommentLike {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  commentId String
+  comment   Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, commentId])
+  @@index([commentId])
+  @@map("comment_likes")
+}
+
+enum NotificationType {
+  COMMENT_LIKE
+  COMMENT_REPLY
+}
+
+/// "Rohan liked your comment", "Priya replied to your comment".
+model Notification {
+  id String @id @default(cuid())
+
+  /// Who receives it.
+  userId String
+  user   User   @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Who caused it. Never equal to `userId` — self-actions do not notify.
+  actorId String
+  actor   User   @relation("NotificationActor", fields: [actorId], references: [id], onDelete: Cascade)
+
+  type NotificationType
+
+  articleId    String?
+  articleTitle String?
+  commentId    String?
+  /// Snapshot of the comment text, so the notification still reads sensibly
+  /// after the comment it refers to is deleted.
+  preview      String?
+
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
+  @@map("notifications")
+}
+
+enum AccountActionType {
+  SUSPEND
+  REINSTATE
+}
+
+/// Append-only audit of staff action on an account. Rows are never updated or
+/// deleted — the history is the point, so a suspension can always be traced to
+/// the person who made it and the reason they gave.
+model AccountAction {
+  id String @id @default(cuid())
+
+  /// The account acted on.
+  userId String
+  user   User   @relation("AccountActionTarget", fields: [userId], references: [id], onDelete: Cascade)
+
+  /// The staff member who acted. Never the same as `userId`: self-suspension is
+  /// refused, because it would lock an administrator out of their own console.
+  actorId String
+  actor   User   @relation("AccountActionActor", fields: [actorId], references: [id], onDelete: Cascade)
+
+  type   AccountActionType
+  /// Required. A suspension with no stated reason is not reviewable later.
+  reason String
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([actorId])
+  @@map("account_actions")
+}
+
+/// Per-article rollup so a feed or a like button never counts rows.
+/// Rows are created on first engagement, not with the article itself —
+/// articles live in the feed service and this app never sees them.
+model ArticleStat {
+  articleId       String  @id
+  articleTitle    String?
+  articleLocation String?
+
+  likeCount    Int @default(0)
+  commentCount Int @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  @@index([likeCount])
+  @@map("article_stats")
+}
+
+model NewsletterSubscriber {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([email])
+  @@index([active])
+  @@map("newsletter_subscribers")
+}
