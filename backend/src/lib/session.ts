@@ -140,7 +140,7 @@ export async function revokeAllSessions(userId: string): Promise<void> {
 export function setAuthCookies(res: Response, tokens: IssuedTokens): void {
   const base = {
     httpOnly: true,
-    secure: isProduction,
+    secure: isProduction || Boolean(env.COOKIE_DOMAIN),
     sameSite: 'lax' as const,
     ...(env.COOKIE_DOMAIN ? { domain: env.COOKIE_DOMAIN } : {}),
   };

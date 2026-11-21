@@ -18,40 +18,40 @@ export function IntegrationClient({ userEmail }: { userEmail: string | null }) {
   const [connectors, setConnectors] = useState<Connector[]>([
     {
       id: 'news_feed_service',
-      name: 'News Feed Service',
-      url: 'http://localhost:8081/health',
-      port: 8081,
-      type: 'UPSTREAM_FEED',
+      name: 'SkyUp News (Audience Platform)',
+      url: 'https://skyupnews.com',
+      port: 443,
+      type: 'LIVE_NEWS_PLATFORM',
       status: 'CHECKING',
     },
     {
       id: 'reporter_backend',
-      name: 'Reporter Editorial Gateway',
-      url: 'http://localhost:8090/health',
-      port: 8090,
+      name: 'Media House (Editorial Gateway)',
+      url: 'https://mediahouse.skyupnews.com/',
+      port: 443,
       type: 'EDITORIAL_GATEWAY',
       status: 'CHECKING',
     },
     {
       id: 'feed_analyst',
-      name: 'Feed Analyst Engine',
-      url: 'http://localhost:8084/health',
-      port: 8084,
+      name: 'News Analyst Engine',
+      url: 'https://newsanalyst.skyupnews.com/login',
+      port: 443,
       type: 'ANALYTICS_SERVICE',
       status: 'CHECKING',
     },
     {
       id: 'auth_backend',
-      name: 'SkyUp Auth Backend',
-      url: 'http://localhost:4000/api/health',
-      port: 4000,
+      name: 'SkyUp Auth Identity Service',
+      url: 'https://auth.skyupnews.com/api/health',
+      port: 443,
       type: 'CORE_IDENTITY_EMS',
       status: 'CHECKING',
     },
   ]);
 
   // EMS Synchronization form state
-  const [emsApiUrl, setEmsApiUrl] = useState('http://localhost:4000/api/integration');
+  const [emsApiUrl, setEmsApiUrl] = useState('https://auth.skyupnews.com/api/integration');
   const [emsApiKey, setEmsApiKey] = useState('');
   const [emsRole, setEmsRole] = useState<'READER' | 'EDITOR' | 'ADMIN'>('READER');
   const [emsDepartment, setEmsDepartment] = useState('');
@@ -65,7 +65,7 @@ export function IntegrationClient({ userEmail }: { userEmail: string | null }) {
   } | null>(null);
 
   // Endpoint Probe Tester state
-  const [testUrl, setTestUrl] = useState('http://localhost:4000/api/health');
+  const [testUrl, setTestUrl] = useState('https://skyupnews.com');
   const [testMethod, setTestMethod] = useState<'GET' | 'POST' | 'HEAD'>('GET');
   const [testAuthHeader, setTestAuthHeader] = useState('');
   const [testTesting, setTestTesting] = useState(false);
@@ -284,14 +284,24 @@ export function IntegrationClient({ userEmail }: { userEmail: string | null }) {
                 <span className="text-muted">
                   {c.latency !== undefined && c.latency !== null ? `${c.latency} ms` : '—'}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => pingConnector(c.id, c.url)}
-                  disabled={c.checking}
-                  className="rounded border border-border bg-background px-2 py-1 font-medium text-foreground transition hover:border-brand disabled:opacity-50"
-                >
-                  {c.checking ? 'Testing…' : 'Ping'}
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <a
+                    href={c.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="rounded border border-border bg-background px-2 py-1 font-medium text-foreground transition hover:border-brand"
+                  >
+                    Open ↗
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => pingConnector(c.id, c.url)}
+                    disabled={c.checking}
+                    className="rounded border border-border bg-background px-2 py-1 font-medium text-foreground transition hover:border-brand disabled:opacity-50"
+                  >
+                    {c.checking ? 'Testing…' : 'Ping'}
+                  </button>
+                </div>
               </div>
             </div>
           ))}
@@ -324,7 +334,7 @@ export function IntegrationClient({ userEmail }: { userEmail: string | null }) {
                   value={emsApiUrl}
                   onChange={(e) => setEmsApiUrl(e.target.value)}
                   className="mt-1.5 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono text-foreground outline-none focus:border-brand focus:ring-1 focus:ring-brand"
-                  placeholder="http://localhost:4000/api/integration"
+                  placeholder="https://auth.skyupnews.com/api/integration"
                 />
               </div>
 
@@ -474,7 +484,7 @@ export function IntegrationClient({ userEmail }: { userEmail: string | null }) {
               value={testUrl}
               onChange={(e) => setTestUrl(e.target.value)}
               className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono text-foreground outline-none focus:border-brand"
-              placeholder="http://localhost:4000/api/health"
+              placeholder="https://skyupnews.com"
             />
 
             <button

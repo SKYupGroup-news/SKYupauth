@@ -5,5 +5,5 @@ export default async function HomePage() {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
   if (user.role === 'ADMIN') redirect('/admin/users');
-  redirect('http://localhost:3000');
+  redirect('https://skyupnews.com');
 }

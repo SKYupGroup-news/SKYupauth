@@ -27,7 +27,7 @@ function Badge({ ok, children }: { ok: boolean; children: React.ReactNode }) {
 export default async function AccountPage() {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
-  if (user.role !== 'ADMIN') redirect('http://localhost:3000');
+  if (user.role !== 'ADMIN') redirect('https://skyupnews.com');
 
   const activeSessions = 1;
   const linkedAccounts: { provider: string }[] = [];

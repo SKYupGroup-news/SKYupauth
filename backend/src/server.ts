@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { prisma } from './lib/db';
 import { isProduction } from './lib/env';
+import { emsPool } from './lib/ems-db';
 import { errorHandler } from './lib/http';
 import { correlationMiddleware, logger } from './lib/logger';
 import { authRouter } from './routes/auth.routes';
@@ -36,16 +37,23 @@ app.use(correlationMiddleware);
 
 // CORS configuration
 const allowedOrigins = [
+  'https://skyupnews.com',
+  'https://www.skyupnews.com',
+  'https://mediahouse.skyupnews.com',
+  'https://newsanalyst.skyupnews.com',
+  'https://auth.skyupnews.com',
   'http://localhost:3000',
   'http://localhost:3100',
   'http://localhost:5173',
+  'http://localhost:5174',
   'http://127.0.0.1:3000',
   'http://127.0.0.1:3100',
   'http://127.0.0.1:5173',
+  'http://127.0.0.1:5174',
 ];
 
 if (process.env.ALLOWED_ORIGINS) {
-  const envOrigins = process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim());
+  const envOrigins = process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim().replace(/\/+$/, ''));
   allowedOrigins.push(...envOrigins);
 }
 
@@ -54,7 +62,13 @@ app.use(
     origin: (origin, callback) => {
       // Allow server-to-server or curl requests with no origin
       if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
+      const cleanOrigin = origin.replace(/\/+$/, '');
+      if (
+        allowedOrigins.includes(cleanOrigin) ||
+        /^https:\/\/([a-z0-9-]+\.)?skyupnews\.com$/i.test(cleanOrigin)
+      ) {
+        return callback(null, true);
+      }
 
       if (isProduction) {
         return callback(new Error('Cross-Origin Request Blocked by Policy'));
@@ -78,6 +92,48 @@ app.get('/api/health', (req, res) => {
     port: PORT,
     timestamp: new Date().toISOString(),
   });
+});
+
+// Cross-Platform Ecosystem Integration Endpoint (used by skyupnews.com, mediahouse.skyupnews.com, newsanalyst.skyupnews.com)
+app.get('/api/integration', (req, res) => {
+  res.json({
+    status: 'ok',
+    service: 'skyup-auth',
+    url: 'https://auth.skyupnews.com',
+    ecosystem: {
+      audienceNews: 'https://skyupnews.com',
+      mediaHouse: 'https://mediahouse.skyupnews.com/',
+      newsAnalyst: 'https://newsanalyst.skyupnews.com/login',
+      authService: 'https://auth.skyupnews.com',
+    },
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.get('/api/integration/employees', async (req, res) => {
+  try {
+    const department = typeof req.query.department === 'string' ? req.query.department.trim() : '';
+    const result = await emsPool.query(
+      `SELECT e.*, o.name AS company_name, o.code AS company_code
+       FROM employees e
+       LEFT JOIN organisations o ON e.org_id = o.id
+       WHERE COALESCE(o.name, 'SKYup Auth') ILIKE '%Auth%'
+       ORDER BY e.id ASC`
+    );
+    let employees = result.rows;
+    if (department) {
+      employees = employees.filter((r: any) =>
+        (r.department_name || '').toLowerCase().includes(department.toLowerCase())
+      );
+    }
+    res.json({
+      ok: true,
+      workspace: 'SKYup Auth',
+      employees,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to query EMS employees' });
+  }
 });
 
 // Deep Readiness Probe (verifies database connectivity & latency)

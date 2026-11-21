@@ -112,7 +112,7 @@ authRouter.post(
     if (adminOnly && user.role !== 'ADMIN') {
       throw new ApiError(
         'forbidden',
-        'Audience customer accounts cannot sign in to this internal management software. Please sign in to the audience news project at http://localhost:3000.'
+        'Audience customer accounts cannot sign in to this internal management software. Please sign in to the audience news project at https://skyupnews.com.'
       );
     }
 

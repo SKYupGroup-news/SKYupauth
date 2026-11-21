@@ -20,10 +20,10 @@ export default async function UsersPage() {
           This is an internal administration software. Audience customer accounts cannot access or sign in to this portal.
         </p>
         <a
-          href="http://localhost:3000"
+          href="https://skyupnews.com"
           className="mt-6 inline-block rounded-lg border border-brand bg-brand px-4 py-2.5 text-sm font-semibold text-brand-contrast shadow-sm transition hover:bg-brand-strong"
         >
-          &rarr; Go to SkyUp News (http://localhost:3000)
+          &rarr; Go to SkyUp News (https://skyupnews.com)
         </a>
       </main>
     );

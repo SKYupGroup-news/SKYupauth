@@ -46,36 +46,36 @@ adminIntegrationRouter.get(
       authorizedAdmin: 'admin@skyupnews.com',
       connectors: [
         {
-          id: 'auth_backend',
-          name: 'SkyUp Auth Backend',
-          url: 'http://localhost:4000/api/health',
-          port: 4000,
-          type: 'EXPRESS_PRISMA',
+          id: 'news_feed_service',
+          name: 'SkyUp News (Audience Platform)',
+          url: 'https://skyupnews.com',
+          port: 443,
+          type: 'UPSTREAM_NEWS_PLATFORM',
+          status: 'ONLINE',
+        },
+        {
+          id: 'reporter_backend',
+          name: 'Media House (Editorial Gateway)',
+          url: 'https://mediahouse.skyupnews.com/',
+          port: 443,
+          type: 'EDITORIAL_API',
           status: 'ONLINE',
         },
         {
           id: 'feed_analyst',
-          name: 'Feed Analyst & Intelligence Engine',
-          url: 'http://localhost:8084/health',
-          port: 8084,
+          name: 'News Analyst & Intelligence Engine',
+          url: 'https://newsanalyst.skyupnews.com/login',
+          port: 443,
           type: 'FASTAPI_ANALYTICS',
           status: 'ONLINE',
         },
         {
-          id: 'news_feed_service',
-          name: 'Upstream News Feed Service',
-          url: 'http://localhost:8081/health',
-          port: 8081,
-          type: 'SOCKET_SSE_FEED',
-          status: 'READY',
-        },
-        {
-          id: 'reporter_backend',
-          name: 'Reporter Editorial Gateway',
-          url: 'http://localhost:8090/health',
-          port: 8090,
-          type: 'EDITORIAL_API',
-          status: 'READY',
+          id: 'auth_backend',
+          name: 'SkyUp Auth Identity Service',
+          url: 'https://auth.skyupnews.com/api/health',
+          port: 443,
+          type: 'EXPRESS_PRISMA',
+          status: 'ONLINE',
         },
       ],
       stats: {
@@ -98,13 +98,16 @@ adminIntegrationRouter.post(
     const start = Date.now();
 
     try {
-      const headers: Record<string, string> = { Accept: 'application/json' };
+      const headers: Record<string, string> = {
+        Accept: 'application/json, text/html, */*',
+        'User-Agent': 'SkyUp-Auth-Integration-Probe/1.0',
+      };
       if (authHeader) headers['Authorization'] = authHeader;
 
       const response = await fetch(url, {
         method,
         headers,
-        signal: AbortSignal.timeout(4000),
+        signal: AbortSignal.timeout(8000),
       });
 
       const latencyMs = Date.now() - start;
