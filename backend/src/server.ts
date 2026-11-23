@@ -4,7 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { prisma } from './lib/db';
-import { isProduction } from './lib/env';
+import { env, isProduction } from './lib/env';
 import { emsPool } from './lib/ems-db';
 import { errorHandler } from './lib/http';
 import { correlationMiddleware, logger } from './lib/logger';
@@ -19,6 +19,7 @@ import { profileRouter } from './routes/profile.routes';
 import { subscriptionRouter } from './routes/subscription.routes';
 
 const app = express();
+app.disable('x-powered-by');
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 4000;
 
 // Trust reverse proxy (e.g. AWS ALB, Cloudflare, NGINX) to get correct client IPs
@@ -42,14 +43,18 @@ const allowedOrigins = [
   'https://mediahouse.skyupnews.com',
   'https://newsanalyst.skyupnews.com',
   'https://auth.skyupnews.com',
-  'http://localhost:3000',
-  'http://localhost:3100',
-  'http://localhost:5173',
-  'http://localhost:5174',
-  'http://127.0.0.1:3000',
-  'http://127.0.0.1:3100',
-  'http://127.0.0.1:5173',
-  'http://127.0.0.1:5174',
+  ...(!isProduction
+    ? [
+        'http://localhost:3000',
+        'http://localhost:3100',
+        'http://localhost:5173',
+        'http://localhost:5174',
+        'http://127.0.0.1:3000',
+        'http://127.0.0.1:3100',
+        'http://127.0.0.1:5173',
+        'http://127.0.0.1:5174',
+      ]
+    : []),
 ];
 
 if (process.env.ALLOWED_ORIGINS) {
@@ -89,6 +94,7 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     service: 'skyup-backend',
+    environment: env.NODE_ENV,
     port: PORT,
     timestamp: new Date().toISOString(),
   });
@@ -156,7 +162,7 @@ app.get('/api/health/ready', async (req, res) => {
     res.status(503).json({
       status: 'unavailable',
       database: 'disconnected',
-      error: err.message,
+      error: isProduction ? 'Database connectivity check failed' : err.message,
       timestamp: new Date().toISOString(),
     });
   }

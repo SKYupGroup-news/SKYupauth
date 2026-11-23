@@ -17,6 +17,7 @@ coverage/
 
 # misc
 .DS_Store
+._*
 *.pem
 *.tsbuildinfo
 next-env.d.ts
@@ -30,3 +31,4 @@ yarn-error.log*
 # generated & backups
 **/src/generated/
 **/backups/
+

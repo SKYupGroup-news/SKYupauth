@@ -5,6 +5,7 @@ import { emsPool } from '@/lib/ems-db';
 import { ApiError, asyncHandler } from '@/lib/http';
 import { requireAdmin, type AuthenticatedRequest } from '@/lib/current-user';
 import { hashPassword } from '@/lib/password';
+import { isProduction } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import type { Role } from '@/generated/prisma';
 
@@ -61,52 +62,54 @@ adminEmployeesRouter.get(
     let rawEmployees: any[] = [];
     let isEmsAvailable = true;
 
-    // First attempt: Query EMS Integration API directly using the SKYup Auth scoped key
+    // First attempt: Query EMS Integration API directly when configured (or in non-production)
     const emsApiUrl = process.env.EMS_INTEGRATION_URL || 'http://localhost:4005/api/integration/companies/SKA/employees';
     const emsApiKey = process.env.EMS_API_KEY || 'ems_5e03df05_BotH3RUsiebHG1RnfYjcONRRzCemMrgM1Cdfy2YWTE8';
 
-    try {
-      const response = await fetch(emsApiUrl, {
-        headers: {
-          'x-api-key': emsApiKey,
-          'Authorization': `Bearer ${emsApiKey}`,
-          'Accept': 'application/json',
-        },
-        signal: AbortSignal.timeout(3000),
-      });
+    if (process.env.EMS_INTEGRATION_URL || !isProduction) {
+      try {
+        const response = await fetch(emsApiUrl, {
+          headers: {
+            'x-api-key': emsApiKey,
+            'Authorization': `Bearer ${emsApiKey}`,
+            'Accept': 'application/json',
+          },
+          signal: AbortSignal.timeout(3000),
+        });
 
-      if (response.ok) {
-        const payload: any = await response.json();
-        const list = Array.isArray(payload) ? payload : (payload?.employees || payload?.data || []);
-        if (Array.isArray(list) && list.length > 0) {
-          rawEmployees = list.map((item: any) => ({
-            id: item.id,
-            org_id: 3,
-            org_name: item.company || 'SKYup Auth',
-            org_code: item.company_code || 'SKA',
-            emp_code: item.emp_code,
-            first_name: item.first_name || (item.name ? item.name.split(' ')[0] : 'Staff'),
-            last_name: item.last_name || (item.name && item.name.includes(' ') ? item.name.split(' ').slice(1).join(' ') : ''),
-            email: item.login_email || item.email,
-            phone: item.phone || null,
-            gender: null,
-            status: item.status || 'active',
-            employment_type: 'full_time',
-            date_of_joining: item.date_of_joining || null,
-            office_location: item.office_location || item.officeLocation || 'Ahmedabad Commercial & Industrial Bureau',
-            base_salary: null,
-            created_at: new Date().toISOString(),
-            department_name: item.department || 'Skyup Authcation',
-            designation_title: item.designation || 'Staff Member',
-            manager_first_name: item.manager_name ? item.manager_name.split(' ')[0] : (item.manager?.name ? item.manager.name.split(' ')[0] : null),
-            manager_last_name: item.manager_name && item.manager_name.includes(' ') ? item.manager_name.split(' ').slice(1).join(' ') : null,
-          }));
+        if (response.ok) {
+          const payload: any = await response.json();
+          const list = Array.isArray(payload) ? payload : (payload?.employees || payload?.data || []);
+          if (Array.isArray(list) && list.length > 0) {
+            rawEmployees = list.map((item: any) => ({
+              id: item.id,
+              org_id: 3,
+              org_name: item.company || 'SKYup Auth',
+              org_code: item.company_code || 'SKA',
+              emp_code: item.emp_code,
+              first_name: item.first_name || (item.name ? item.name.split(' ')[0] : 'Staff'),
+              last_name: item.last_name || (item.name && item.name.includes(' ') ? item.name.split(' ').slice(1).join(' ') : ''),
+              email: item.login_email || item.email,
+              phone: item.phone || null,
+              gender: null,
+              status: item.status || 'active',
+              employment_type: 'full_time',
+              date_of_joining: item.date_of_joining || null,
+              office_location: item.office_location || item.officeLocation || 'Ahmedabad Commercial & Industrial Bureau',
+              base_salary: null,
+              created_at: new Date().toISOString(),
+              department_name: item.department || 'Skyup Authcation',
+              designation_title: item.designation || 'Staff Member',
+              manager_first_name: item.manager_name ? item.manager_name.split(' ')[0] : (item.manager?.name ? item.manager.name.split(' ')[0] : null),
+              manager_last_name: item.manager_name && item.manager_name.includes(' ') ? item.manager_name.split(' ').slice(1).join(' ') : null,
+            }));
+          }
         }
+      } catch (apiErr: any) {
+        logger.info('EMS Integration API fetch skipped or errored; falling back to scoped database query', {
+          error: apiErr.message,
+        });
       }
-    } catch (apiErr: any) {
-      logger.info('EMS Integration API fetch skipped or errored; falling back to scoped database query', {
-        error: apiErr.message,
-      });
     }
 
     if (rawEmployees.length === 0) {
